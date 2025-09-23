@@ -6,7 +6,6 @@ FROM runpod/pytorch:1.0.0-cu1281-torch280-ubuntu2204
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server nginx && rm -rf /var/lib/apt/lists/*
 
-
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
