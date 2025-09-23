@@ -1,0 +1,4 @@
+marimo>=0.8
+uvicorn
+# HF stack (optional; add what you need)
+transformers accelerate datasets bitsandbytes
