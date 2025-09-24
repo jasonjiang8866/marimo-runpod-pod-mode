@@ -1,28 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Where we created the venv in the Dockerfile (uv venv runs in /workspace)
-WORKDIR="/workspace"
-VENV_DIR="${WORKDIR}/.venv"
 PORT="${MARIMO_PORT:-8080}"
 HOST="0.0.0.0"
+ROOT="${NOTEBOOK_ROOT:-/workspace}"
 
-cd "$WORKDIR"
-
-# Activate the uv-managed venv (created by `uv venv`)
-if [[ -d "$VENV_DIR" ]]; then
-  # shellcheck disable=SC1091
-  source "${VENV_DIR}/bin/activate"
-else
-  echo "ERROR: Virtual environment not found at ${VENV_DIR}."
-  echo "Did the Docker build run 'uv venv' successfully?"
-  exit 1
+# Build the RunPod proxy host if the platform exposes the Pod ID
+# Proxy URL format is: https://[pod-id]-[port].proxy.runpod.net/  (TLS via 443)
+PROXY_FLAG=()
+if [[ -n "${RUNPOD_POD_ID:-}" ]]; then
+  PROXY_FLAG=(--proxy "${RUNPOD_POD_ID}-${PORT}.proxy.runpod.net:443")
 fi
 
-# Optional: create a notebooks directory to keep things tidy
-NOTEBOOK_ROOT="${NOTEBOOK_ROOT:-$WORKDIR}"
-mkdir -p "$NOTEBOOK_ROOT"
+# Auth: disable token for easier health checks, or set MARIMO_TOKEN_PASSWORD for a fixed token
+AUTH_FLAG=()
+if [[ -n "${MARIMO_TOKEN_PASSWORD:-}" ]]; then
+  AUTH_FLAG=(--token-password "${MARIMO_TOKEN_PASSWORD}")
+else
+  AUTH_FLAG=(--no-token)
+fi
 
-# Launch Marimo editor (headless) bound to all interfaces
-# Use exec so Marimo becomes PID 1 (proper signal handling in containers)
-exec marimo edit --headless --host "${HOST}" --port "${PORT}" "${NOTEBOOK_ROOT}"
+# Optional CORS
+ALLOW_ORIGINS="${ALLOW_ORIGINS:-*}"
+
+exec marimo edit \
+  --headless \
+  --host "${HOST}" \
+  --port "${PORT}" \
+  --allow-origins "${ALLOW_ORIGINS}" \
+  "${AUTH_FLAG[@]}" \
+  "${PROXY_FLAG[@]}" \
+  "${ROOT}"

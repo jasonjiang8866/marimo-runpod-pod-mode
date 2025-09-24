@@ -12,10 +12,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # Python deps
 WORKDIR /workspace
 COPY requirements.txt /workspace/
-# activate a virtual environment
-RUN uv venv
-# install into the virtual environment all dependencies
-RUN uv pip install -r requirements.txt
+# Create venv OUTSIDE /workspace so volumes don't shadow it
+RUN uv venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    uv pip install -r /workspace/requirements.txt
+# Make it the default Python
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 
 # Marimo port
 ENV MARIMO_PORT=8080
