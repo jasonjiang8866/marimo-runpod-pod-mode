@@ -2,7 +2,14 @@
 set -euo pipefail
 IMAGE="${1:?Pass an image tag}"
 WORKSPACE="$(mktemp -d)"
-cleanup() { docker rm -f marimo-smoke >/dev/null 2>&1 || true; rm -rf -- "$WORKSPACE"; }
+cleanup() {
+  docker rm -f marimo-smoke >/dev/null 2>&1 || true
+  # The default RunPod user is root; return bind-mounted test files to the host
+  # user before removing this newly-created temporary directory.
+  docker run --rm --user 0:0 --entrypoint /bin/chown \
+    -v "$WORKSPACE:/cleanup" "$IMAGE" -R "$(id -u):$(id -g)" /cleanup
+  rm -rf -- "$WORKSPACE"
+}
 trap cleanup EXIT
 printf '# retained user file\n' > "$WORKSPACE/user.py"
 # A hosted CI runner has no GPU. This tests imports/server boot only, never CUDA.
