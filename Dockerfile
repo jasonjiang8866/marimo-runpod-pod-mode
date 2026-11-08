@@ -1,30 +1,45 @@
-# CUDA-enabled base so HF libs can use GPU on NVIDIA pods
-FROM runpod/pytorch:1.0.0-cu1281-torch280-ubuntu2204
+# syntax=docker/dockerfile:1
+ARG PYTHON_IMAGE=python:3.12.14-slim-bookworm
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.13.7
+FROM ${UV_IMAGE} AS uv
+FROM ${PYTHON_IMAGE}
 
-# Platform niceties that Runpod containers expect
-# (Jupyter/SSH help debugging; not required for Marimo itself but common in Runpod templates)
+ARG RUNTIME_PROFILE=cu128
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/jasonjiang8866/marimo-runpod-pod-mode" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"
+
+# Wheels supply user-space CUDA; the host supplies the driver. No nvcc or SSH.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssh-server nginx && rm -rf /var/lib/apt/lists/*
+    ca-certificates git libgomp1 tini \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=uv /uv /uvx /usr/local/bin/
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    RUNTIME_PROFILE=${RUNTIME_PROFILE} \
+    MARIMO_PORT=8080
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+WORKDIR /opt/marimo
+COPY requirements.txt profiles.json ./
+COPY scripts/install_runtime.py scripts/install_runtime.py
+RUN uv venv /opt/venv \
+    && python scripts/install_runtime.py "${RUNTIME_PROFILE}" \
+    && uv pip install --no-cache -r requirements.txt \
+    && uv pip check \
+    && python -c "import marimo, torch; print(marimo.__version__, torch.__version__, torch.version.cuda)" \
+    && uv pip freeze > build-packages.txt
+COPY scripts/ scripts/
+COPY start.sh ./
+COPY notebooks/ examples/
+RUN chmod +x start.sh && mkdir -p /workspace
 
-# Python deps
 WORKDIR /workspace
-COPY requirements.txt /workspace/
-# Create venv OUTSIDE /workspace so volumes don't shadow it
-RUN uv venv /opt/venv && \
-    . /opt/venv/bin/activate && \
-    uv pip install -r /workspace/requirements.txt
-# Make it the default Python
-ENV VIRTUAL_ENV=/opt/venv
-ENV PATH=/opt/venv/bin:$PATH
-
-# Marimo port
-ENV MARIMO_PORT=8080
 EXPOSE 8080
-
-# Start Marimo in headless mode, served on 0.0.0.0
-COPY start.sh /start.sh
-RUN chmod +x /start.sh
-CMD ["/bin/bash", "-lc", "/start.sh"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD ["python", "/opt/marimo/scripts/healthcheck.py"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
+CMD ["/opt/marimo/start.sh"]
