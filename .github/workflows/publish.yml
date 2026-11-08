@@ -1,0 +1,55 @@
+name: Publish selected runtime image
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: PyTorch runtime profile
+        type: choice
+        options: [cpu, cu126, cu128, cu132]
+        required: true
+        default: cu128
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: publish-${{ github.ref }}-${{ inputs.profile }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    # Publication is deliberate and restricted to the default branch.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Define source tag
+        env:
+          PROFILE: ${{ inputs.profile }}
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA}-$PROFILE" >> "$GITHUB_ENV"
+      - name: Build locally before publication
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE }}
+          build-args: |
+            RUNTIME_PROFILE=${{ inputs.profile }}
+            SOURCE_REVISION=${{ github.sha }}
+      - name: Test boot, auth and mounted workspace
+        run: bash scripts/container_smoke.sh "$IMAGE"
+      - name: Push tested image and record digest
+        run: |
+          docker push "$IMAGE"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE")
+          printf 'Deploy the digest-pinned image:\n\n`%s`\n' "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove test container
+        if: always()
+        run: docker rm -f marimo-smoke 2>/dev/null || true

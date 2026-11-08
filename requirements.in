@@ -1,0 +1,4 @@
+# The editor is deliberately separate from workload-specific ML dependencies.
+marimo==0.25.2
+# NumPy interop is part of the notebook/PyTorch baseline.
+numpy==2.5.4

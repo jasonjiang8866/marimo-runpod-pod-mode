@@ -1,0 +1,6 @@
+{
+  "cpu": {"torch": "2.15.0", "index": "cpu", "cuda": null},
+  "cu126": {"torch": "2.14.1", "index": "cu126", "cuda": "12.6"},
+  "cu128": {"torch": "2.11.0", "index": "cu128", "cuda": "12.8"},
+  "cu132": {"torch": "2.15.0", "index": "cu132", "cuda": "13.2"}
+}

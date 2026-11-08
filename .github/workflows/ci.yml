@@ -1,0 +1,60 @@
+name: Validate notebook runtime
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: runtime-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install the pinned editor and CPU PyTorch
+        run: |
+          python -m pip install uv==0.13.7
+          uv venv .venv
+          uv pip install -r requirements.txt
+          .venv/bin/python scripts/install_runtime.py cpu
+          uv pip check
+      - name: Bootstrap, authentication and hardware gate tests
+        run: |
+          bash -n start.sh
+          .venv/bin/python -m unittest discover -s tests -v
+          .venv/bin/marimo check notebooks/hardware_check.py
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [cpu, cu126, cu128, cu132]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
+      - name: Build the image (no publication)
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          platforms: linux/amd64
+          tags: marimo-ci:${{ matrix.profile }}
+          build-args: |
+            RUNTIME_PROFILE=${{ matrix.profile }}
+            SOURCE_REVISION=${{ github.sha }}
+      - name: Import and boot with a mounted empty workspace
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: bash scripts/container_smoke.sh "marimo-ci:$PROFILE"
+      - name: Remove test container
+        if: always()
+        run: docker rm -f marimo-smoke 2>/dev/null || true
